@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: #{kubernetes.deploymentname}#
+  labels:
+    app: #{kubernetes.deploymentname}#
+    version: v-#{kubernetes.imageversion}#
+  namespace: #{kubernetes.namespace}#
+spec:
+  replicas: #{kubernetes.replicas}#
+  selector:
+    matchLabels:
+      app: #{kubernetes.deploymentname}#
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  minReadySeconds: 5 
+  template:
+    metadata:
+      labels:
+        app: #{kubernetes.deploymentname}#
+    spec:
+      volumes:
+      - name: #{kubernetes.deploymentname}#
+        persistentVolumeClaim:
+          claimName: #{kubernetes.deploymentname}#
+      containers:
+      - name: #{kubernetes.deploymentname}#
+        image: #{DOCKER_REGISTRY}#/#{kubernetes.imagename}#:#{kubernetes.imageversion}#
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+          - name: #{kubernetes.deploymentname}#
+            mountPath: /app/reports
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: #{kubernetes.deploymentname}#
+  namespace: #{kubernetes.namespace}#
+spec:
+  type: ClusterIP
+  selector:
+    app: #{kubernetes.deploymentname}#
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8080
+    targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: #{kubernetes.deploymentname}#-ingress
+  namespace: #{kubernetes.namespace}#
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    #{kubernetes.whitelist.option}##{kubernetes.whitelist.cidr}#
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - #{kubernetes.domain}#
+    secretName: #{kubernetes.domain}#-secret
+  rules:
+    - host: #{kubernetes.domain}#
+      http:
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: #{kubernetes.deploymentname}#
+                port:
+                  number: 8080
