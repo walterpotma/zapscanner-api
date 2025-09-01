@@ -16,7 +16,6 @@ api/
 ├── scripts/
 │   └── run-zap.sh                # Script Bash que executa o ZAP e gera relatórios JSON
 ├── services/
-│   ├── notifier.py               # Serviço de notificações (Google Chat)
 │   ├── render.py                 # Processa JSON do ZAP e gera relatórios HTML
 │   └── scanner.py                # Classe para execução do scan via subprocess
 ├── src/
@@ -37,15 +36,7 @@ api/
 - Script responsável por chamar o OWASP ZAP com os parâmetros configurados.
 - Gera relatórios em formato JSON que depois são processados pelo serviço `render.py`.
 
-### 2. `services/notifier.py`
-- Serviço de integração com sistemas de alerta.
-- Função: `send_google_chat_alert(webhook_url, message)`
-- Envia mensagens para o Google Chat via Webhook.
-- Corpo da mensagem enviado em JSON (`{"text": message}`).
-- Logs registrados em caso de sucesso ou erro.
-- **Uso opcional** para notificação automática após execução de scans.
-
-### 3. `services/render.py`
+### 2. `services/render.py`
 - Processa relatórios JSON gerados pelo ZAP e transforma em relatórios HTML prontos para visualização.
 
 **Funções internas:**
@@ -121,7 +112,6 @@ A lógica de scan fica encapsulada e reutilizável em diferentes contextos (API,
 4. Ao finalizar, é gerado um JSON → processado por `render.py` → salvo como HTML.
 5. `reports_index.json` é atualizado.
 6. Relatórios ficam disponíveis para listagem, visualização, download ou exclusão.
-7. (Opcional) Envio de alertas para Google Chat (`notifier.py`).
 
 ---
 
@@ -133,3 +123,150 @@ A lógica de scan fica encapsulada e reutilizável em diferentes contextos (API,
 - **Jinja2-like placeholders** – injeção de dados em templates HTML.
 - **Google Chat Webhooks** – integração opcional de alertas.
 - **Docker + Kubernetes (AKS)** – empacotamento e orquestração.
+
+
+# 📘 Documentação – Frontend ZapScanner
+
+O objetivo do **frontend** deste projeto é fornecer uma interface simples, interativa e agradável para executar scans com o OWASP ZAP e visualizar relatórios.  
+Ele foi desenvolvido apenas com **HTML, CSS e JavaScript puro**.
+
+---
+
+## 📂 Estrutura do Frontend
+
+```
+frontend/
+├── css/
+│ └── style.css # Estilização do frontend (dark/light mode)
+├── html/
+│ ├── index.html # Página inicial – executa scans e mostra logs
+│ └── dashboard.html # Página de dashboard – lista relatórios e filtros
+├── img/ # Imagens e ícones
+├── Dockerfile # Build da aplicação frontend
+└── deployment-aks.yaml # Deploy no Kubernetes (AKS)
+
+```
+## ⚙️ Arquivos Principais
+
+### 1. `index.html`
+Página inicial usada para executar um novo scan e acompanhar logs em tempo real.
+
+**Endpoints utilizados:**
+- `POST /api/scan` → inicia um novo scan para a URL informada.
+- `GET /api/scan/status/<url>` → consulta o progresso e logs do scan em andamento.
+
+**Principais funções e classes:**
+
+- **themeToggle**  
+  - Alterna entre **modo claro e escuro**.  
+  - Salva a preferência no `localStorage`.
+
+- **SmartTerminal (classe)**  
+  - Gera um "terminal interativo" que exibe logs linha a linha.  
+  - Faz *auto-scroll* quando o usuário está no final da saída.  
+  - Se o usuário rolar manualmente, o auto-scroll é pausado.
+
+- **scanBtn (listener assíncrono no botão "Iniciar Scan")**  
+  - Valida a URL digitada.  
+  - Faz `POST /api/scan`.  
+  - Recebe o `monitor_url` da API.  
+  - Chama `startPolling()` para verificar status e exibir logs em tempo real.  
+  - Atualiza a UI com estado de execução (spinner, status "Executando...").
+
+- **startPolling(monitor_url)**  
+  - Faz requisições periódicas ao endpoint de status.  
+  - Atualiza os logs no terminal em tempo real.  
+  - Quando o scan termina, exibe o resultado (`completed` ou `failed`) e adiciona link para o dashboard.
+
+- **resetUI(statusMessage)**  
+  - Restaura a interface para o estado inicial (botão reativado, status atualizado).
+
+- **clearOutput (listener no botão "Limpar")**  
+  - Chama `smartTerminal.clear()` para limpar logs.  
+  - Restaura mensagem inicial no terminal.  
+  - Reseta a UI para "Pronto para executar".
+
+---
+
+### 2. `dashboard.html`
+Página de **dashboard** que lista relatórios já gerados e permite filtrar, visualizar, baixar ou excluir.
+
+**Endpoints utilizados:**
+- `GET /api/reports` → lista relatórios disponíveis (dados de `reports_index.json`).
+- `GET /api/reports/download/<filename>` → baixa relatório HTML.  
+- `DELETE /api/reports/delete/<filename>/<url>` → exclui relatório e remove do índice.
+
+**Principais funções:**
+
+- **themeToggle**  
+  - Mesmo comportamento da página inicial: alterna dark/light mode e salva no `localStorage`.
+
+- **formatDate(dateString)**  
+  - Converte datas do backend em formato legível (`dd/MMM/yyyy HH:mm`).
+
+- **timeAgo(dateString)**  
+  - Calcula há quanto tempo o relatório foi gerado (ex: "5 minutes ago").
+
+- **loadReports()**  
+  - Monta dinamicamente os cards de relatórios no DOM.  
+  - Cada card exibe:
+    - Nome do domínio.  
+    - Data do scan.  
+    - Contadores por nível de risco.  
+    - Botões de ações (ver, baixar, excluir).
+
+- **viewReport(htmlFilename)**  
+  - Abre relatório em nova aba para visualização.
+
+- **downloadReport(htmlFilename)**  
+  - Faz download do relatório HTML via API.
+
+- **updateStats()**  
+  - Atualiza os totais de riscos (High, Medium, Low, Informational).  
+  - Mostra data/hora do último relatório.  
+  - Atualiza os cards de estatísticas no topo do dashboard.
+
+- **deleteReport(url, caminho_html)**  
+  - Exibe confirmação antes de excluir.  
+  - Chama `DELETE /api/reports/delete/...`.  
+  - Atualiza a lista de relatórios.  
+  - ⚠️ *Observação:* a função contém um trecho redundante de event listener extra para `#btn-delete`, que pode ser simplificado no futuro.
+
+- **showStatus(message)**  
+  - Mostra mensagem de status (alerta).  
+  - Recarrega a página após exclusão.
+
+- **searchInput (event listener)**  
+  - Permite buscar relatórios por **nome, domínio ou descrição**.  
+  - Filtra dinamicamente os cards exibidos.
+
+- **filterButtons (event listener)**  
+  - Permite filtrar relatórios por nível de risco (`All`, `High`, `Medium`, `Low`).  
+  - Exibe somente os cards que contêm o nível selecionado.
+
+- **updateTimestamp()**  
+  - Mostra no rodapé a hora da última atualização do dashboard.
+
+---
+
+## 🔎 Fluxo do Frontend
+
+1. Usuário acessa `index.html`.  
+   - Digita a URL.  
+   - Inicia scan via botão.  
+   - Acompanha logs em tempo real no terminal.  
+   - Ao finalizar, recebe link para o dashboard.
+
+2. Usuário acessa `dashboard.html`.  
+   - Vê lista de relatórios já processados.  
+   - Filtra por risco ou pesquisa por domínio.  
+   - Pode visualizar, baixar ou excluir relatórios.
+
+---
+
+## 🚀 Tecnologias Utilizadas no Frontend
+
+- **HTML5 / CSS3 / JavaScript** – Estrutura, estilo e interatividade.  
+- **LocalStorage** – Persistência do tema (dark/light).  
+- **Fetch API** – Comunicação com a API Flask.  
+- **DOM Manipulation** – Inserção dinâmica de logs e relatórios.
